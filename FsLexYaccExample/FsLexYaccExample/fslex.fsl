@@ -1,0 +1,180 @@
+(*
+Summary: fslex.exe is the lexer generator for F#.  It follows the model of the ocamllex lexer
+
+The fslex.exe tool is a lexer generator for 8-bit (byte) character input.  It follows the specification of the 'ocamllex' tools.  See http://caml.inria.fr/pub/docs/manual-ocaml/manual026.html for a description of OCamllex.
+
+Rumour has it that Unicode lexing will be in a future release of F#.  
+
+This is taken from the 'Parsing' sample in the F# distribution. See below for information on 'newline' and line counting.
+*)
+{
+module FsLex
+open FsYacc
+open System
+open Microsoft.FSharp.Text.Lexing
+open System.Text
+
+let newline lexbuf = ()
+
+let lexeme (lexbuf: LexBuffer<byte>): string = UnicodeEncoding.Unicode.GetString(lexbuf.Lexeme)
+
+}
+
+ let digit = ['0'-'9']
+ let whitespace = [' ' '\t' ]
+ let newline = ('\n' | '\r' '\n')
+ 
+ rule token = parse
+ | whitespace	{ token lexbuf }
+ | newline        { newline lexbuf; token lexbuf }
+ | "while"	{ WHILE }
+ | "begin"	{ BEGIN }
+ | "end"		{ END }
+ | "do"		{ DO }
+ | "if"		{ IF }
+ | "then"		{ THEN }
+ | "else"		{ ELSE }
+ | "print"        { PRINT }
+ | "decr"         { DECR }
+ | "("            { LPAREN }
+ | ")"            { RPAREN }
+ | ";"		{ SEMI }
+ | ":="		{ ASSIGN }
+ | ['a'-'z']+     { ID(lexeme lexbuf) }
+ | ['-']?digit+       { INT (Int32.Parse(lexeme lexbuf)) }
+ | ['-']?digit+('.'digit+)?(['e''E']digit+)?   { FLOAT (Double.Parse(lexeme lexbuf)) }
+ | eof   { EOF }
+
+(*
+More than one lexer state is permitted - use 
+
+  rule state1 = 
+   | "this"    { state2 lexbuf }
+   | ...
+  and state2 = 
+   | "that"    { state1 lexbuf }
+   | ...
+
+States can be passed arguments:
+
+  rule state1 arg1 arg2 = ...
+   | "this"    { state2 (arg1+1) (arg2+2) lexbuf }
+   | ...
+  and state2 arg1 arg2 = ...
+   | ...
+
+!!!Using a lexer 
+
+If in the first exmaple above the constructors 'INT' etc generate values of type 'tok' then the above generates a lexer with a function 
+
+  val token : Microsoft.FSharp.Primitives.Lexing.LexBuffer<'mark,byte> -> tok
+
+Once you have a lexbuffer you can call the above to generate new tokens.  Typically you use some functions from '''MLLib.Lexing''' to create lex buffers.  In this case 'mark' is instantiated to a particular type:
+
+ type lexbuf = Microsoft.FSharp.Primitives.Lexing.LexBuffer<position,byte>
+
+Some ways of creating lex buffers are by using:
+
+ module Microsoft.FSharp.MLLib.Lexing
+ val from_channel: in_channel -> lexbuf
+ val from_stream_reader: System.IO.StreamReader -> lexbuf
+ val from_text_reader:  (_ :> System.Text.Encoding) -> System.IO.TextReader -> lexbuf
+ val from_string: string -> lexbuf
+ val from_bytearray: byte[] -> lexbuf
+
+and most generally by using:
+
+ val from_function: (byte[] * int * int -> int) -> lexbuf
+
+Within lexing actions you may use functions such as:
+
+ module Microsoft.FSharp.MLLib.Lexing
+ val lexeme: lexbuf -> string
+ val lexeme_char: lexbuf -> int -> char
+
+See below for a description of lexing positions and their uses.  Generated lexers are nearly always used in conjunction with parsers generarted by [fsyacc]. Putting a parser and a lexer together is very simple:
+
+    let lexbuf = Lexing.from_stream_reader stream in 
+    Pars.start Lex.token lexbuf
+
+That is, the lexer function is simply passed as an argument to the parser function.  The parser repeatedly applies the lexing function to the lexbuffer argument as necessary.
+
+!!!Command line options
+
+ fslex <filename>
+   -o Name the output file.
+   --tokens Simply tokenize the specification file itself.
+   -help  Display this list of options
+   --help  Display this list of options
+
+
+!!!Positions and line counting in lexers
+
+Within a lexer lines can in theory be counted simply by incrementing a global variable or a passed line number count: 
+
+  rule token line = ...
+   | "\n" | '\r' '\n'    { token (line+1) }
+   | ...
+
+However for character positions this is tedious, as it means every action becomes polluted with character counting, as you have to manually attach line numbers to tokens.  Also, for error reporting "writing service":http://customwritingservices.org/ it is useful to have to have position information associated held as part of the state in the lexbuffer itself.
+
+Thus F# follows the ocamllex model where the lexer and parser state carry 'position' values that record information for the current match (lex) and the l.h.s/r.h.s of the grammar productions (yacc). 
+
+You are in principle free to use any type to instantiate the 'position' type argument of the underlying lex buffer (see '''Microsoft.FSharp.Primitives.Lexing.LexBuffer''', which is parameterized by the type of mark and the kind of character - the latter to make way for Unicode lexers in the future).  However typically you instantiate to a type that matches that used by ocamllex lexers, and indeed this is implicit if you ever use code from the '''MLLib.Lexing''' module.  See, for example, the following type in '''Microsoft.FSharp.MLLib.Lexing'''. (src\lib\mllib\lexing.mli)
+
+  type position = 
+   {pos_fname: string;
+    pos_lnum: int;
+    pos_bol: int;
+    pos_cnum: int; }
+
+Here the information carried for each position is:
+	* a filename
+	* a current 'absolute' character number
+	* a placeholder for a user-tracked beginning-of-line marker
+	* a placeholder for a user-tracked line number count.  
+
+Note also the following comment in samples\fsharp\Parsing\lex.fsl (to be honest the code below occurs in every line-tracking fslex lexer, so should really be added to the 'Lexing' module!).
+
+ (* fslex generated lexers follow the same pattern as ocamllex *)
+ (* and mossmllex generated lexers, and do not update line number *)
+ (* information automatically, partly because the knowledge of when *)
+ (* a newline has occurred is best placed in the lexer rules. *)
+ (* Thus the following boiler-plate code is very useful. *)
+ 
+ let inc_lnum bol pos =
+   let lnum = pos.pos_lnum in
+   {pos with pos_lnum =  lnum+1; pos_bol = bol }  
+ 
+ let newline lexbuf =
+   Lexing.lexbuf_set_curr_p lexbuf 
+     ( inc_lnum (lexeme_end lexbuf) (lexeme_end_p lexbuf))
+
+!!!Passing state through lexers
+
+It is sometimes under-appreciated that you can pass arguments around between lexer states.  For example, in one example we used imperative state to track a line number.  
+
+ let current_line = ref 0
+ let current_char = ref 0
+ let set_next_line lexbuf =
+    incr current_line;
+    current_char := Lexing.lexeme_end lexbuf
+  
+ 
+ ...
+ rule main = parse
+   | ...
+   | "//" [^ '\n']* '\n' {
+        set_next_line lexbuf; main lexbuf
+     }
+
+Although it is better to do line-number tracking through lexbuffer positions, it's also worth knowing that it may be possible to eliminate imperative state related to lexing by passing arguments:
+
+ rule main line char = parse
+   | ...
+   | "//" [^ '\n']* '\n' {
+        main (line+1) 0 lexbuf
+     }
+
+A good examples is that when lexing a comment you want to pass through the start-of-comment position so that you can give a good error message if no end-of-comment is found.  Or likewise you may want to pass through the number of nested of comments.
+*)
