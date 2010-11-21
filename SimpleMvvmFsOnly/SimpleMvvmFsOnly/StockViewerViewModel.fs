@@ -57,39 +57,54 @@ type Quote =
       Value: float }
 
 type StockViewerViewModel() =
+    // indicates if the screen is busy or not
     let mutable isBusy = true
+    // contains the currect company
     let mutable selectedCompany = ""
 
+    // diction of company name * quote data
     let dataDict = new Dictionary<string, ObservableCollection<Quote>>()
+    // list of companies to drive drop down
     let companies = new ObservableCollection<string>()
 
+    // prepopulate the list of companies and we know which ones we're fetching
     do for (name, symbol, _) in DataAccess.djia do
         companies.Add(name)
 
+    // create an event object
     let cecEvent = new Event<PropertyChangedEventHandler,PropertyChangedEventArgs>()
+    // implement the interface INotifyPropertyChanged
     interface INotifyPropertyChanged with
+        // PropertyChanged is raised each time a property changes, 
+        // it's INotifyPropertyChanged's only memeber
         [<CLIEvent>]
         member x.PropertyChanged = cecEvent.Publish
 
+    // this method provides a convient way of raising the PropertyChanged event
     member x.TriggerPropertyChanged(name)=
         cecEvent.Trigger (x, new PropertyChangedEventArgs(name))
+
+    // exposes the busy indicator
     member x.IsBusy
         with get() = isBusy
         and set value = 
             isBusy <- value
             x.TriggerPropertyChanged("IsBusy")
+    // exposes the list of companies
     member x.Companies = companies
+    // will be bound to the combo box, so we can know which company's selected
     member x.SelectedCompany
         with get() = selectedCompany
         and set value = 
             selectedCompany <- value
             x.TriggerPropertyChanged("SelectedCompany")
             x.TriggerPropertyChanged("CurrentQuotes")
-
+    // exposes the quote data of the currently selected company
     member x.CurrentQuotes = 
         if dataDict.ContainsKey selectedCompany then dataDict.[selectedCompany] 
         else new ObservableCollection<_>()
 
+    // initalises the GUI, so should be called once it is loaded
     member x.OnLoaded() =
         // grab the synchronization context, this will be used later to call back to the GUI thread
         let syncContext = System.Threading.SynchronizationContext()
