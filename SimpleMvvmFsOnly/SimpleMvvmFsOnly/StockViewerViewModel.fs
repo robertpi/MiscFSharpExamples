@@ -91,16 +91,30 @@ type StockViewerViewModel() =
         else new ObservableCollection<_>()
 
     member x.OnLoaded() =
+        // grab the synchronization context, this will be used later to call back to the GUI thread
         let syncContext = System.Threading.SynchronizationContext()
-        let workflows = DataAccess.djia |> Seq.map (fun (_, symbol, _) -> DataAccess.getStockInfo symbol DateTime.Now (DateTime.Now.AddDays(-28.)))
+
+        // 
+        let workflows = 
+            DataAccess.djia 
+            |> Seq.map (fun (_, symbol, _) ->
+                // get stock infos is a little function that returns an async workflow 
+                // that will connect to Yahoo! Finance return a list of dates and stock values
+                DataAccess.getStockInfo symbol DateTime.Now (DateTime.Now.AddDays(-28.)))
     
         let workflow =
-            async { x.IsBusy <- true
+            async { // notify the gui that we're busy
+                    x.IsBusy <- true
+                    // make the async calls
                     let! data = Async.Parallel workflows
+                    // switch back to the gui thread
                     do! Async.SwitchToContext(syncContext)
+                    // write the data to the objects that are bound to the GUI
                     let symbolData = Seq.zip DataAccess.djia data
                     for ((name, _, _), data) in symbolData do
                         let quotes = data |> Seq.map(fun (d, p, _, _, _, _, _) -> { Date = d; Value = p})
                         dataDict.Add(name, new ObservableCollection<Quote>(quotes))
                     x.IsBusy <- false }
+        // the start immediately will start the workflow on the gui thread meaning before the
+        // first async call we can interact with gui objects
         Async.StartImmediate workflow
