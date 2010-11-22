@@ -56,6 +56,7 @@ type Quote =
     { Date: DateTime
       Value: float }
 
+// A view model for a simple stock price history viewing app
 type StockViewerViewModel() =
     // indicates if the screen is busy or not
     let mutable isBusy = true
