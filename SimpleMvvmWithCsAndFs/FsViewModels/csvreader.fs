@@ -39,6 +39,7 @@ type CsvReader<'a>(s: String, ?skipRows: int, ?dateFormat: string) =
             fun (s: string) ->
                 parse.Invoke(null, [| box s |]) 
     let funcs = Seq.map getParseFunc elements
+    //do printfn "%s" s
     let lines = s.Split([|'\r'; '\n' |], StringSplitOptions.RemoveEmptyEntries)
     let lines = 
         match skipRows with
